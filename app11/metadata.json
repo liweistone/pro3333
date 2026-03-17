@@ -1,0 +1,7 @@
+{
+  "name": "2026马年·电商视觉-拜年海报生成器",
+  "description": "基于 Grsai Nano Banana Pro API 的 4K 高端电商主图批量生成器，内置春节营销策划专家模型。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

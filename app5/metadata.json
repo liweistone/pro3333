@@ -1,0 +1,7 @@
+{
+  "name": "对已有的简单的主图策划方案进行优化后批量生成图像",
+  "description": "Advanced batch image generator for e-commerce, powered by Grsai Nano Banana Pro API, supporting 4K resolution and reference images.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
