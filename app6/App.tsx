@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { LumiService } from './services/lumiService';
-import { LumiStep, LumiAnalysisResult, LumiTaskState, LumiConfig } from './types';
-import { Upload, Zap, Sparkles, LayoutPanelLeft, Play, Image as ImageIcon, Video, Loader2, ArrowRight, ShieldCheck, Cpu, Download, RefreshCcw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { LumiStep, LumiAnalysisResult, LumiTaskState, LumiConfig, LumiAspectRatio } from './types';
+import { Upload, Zap, Sparkles, LayoutPanelLeft, Play, Image as ImageIcon, Video, Loader2, ArrowRight, ShieldCheck, Cpu, Download, RefreshCcw, CheckCircle2, AlertCircle, RectangleHorizontal, RectangleVertical, Square, Scan, MousePointer2 } from 'lucide-react';
 
 const lumiService = new LumiService();
 
@@ -19,7 +19,42 @@ const App6LumiFluxApp: React.FC = () => {
   const [statusText, setStatusText] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // 智造参数配置
+  const [config, setConfig] = useState<LumiConfig>({
+    aspectRatio: 'auto',
+    imageResolution: '2K',
+    videoResolution: '1080p',
+    duration: 5
+  });
+  // 自动检测到的比例
+  const [detectedRatio, setDetectedRatio] = useState<string>('');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 智能比例嗅探逻辑
+  useEffect(() => {
+    if (originalUrl) {
+      const img = new Image();
+      img.src = originalUrl;
+      img.onload = () => {
+        const ratio = img.width / img.height;
+        let suggested: LumiAspectRatio = '1:1';
+        
+        if (ratio > 1.6) suggested = '16:9';
+        else if (ratio > 1.2) suggested = '4:3';
+        else if (ratio < 0.6) suggested = '9:16';
+        else if (ratio < 0.8) suggested = '3:4';
+        else suggested = '1:1';
+
+        setDetectedRatio(suggested);
+        // 如果当前是自动模式，直接应用
+        if (config.aspectRatio === 'auto') {
+          // 这里我们保持 config.aspectRatio 为 'auto'，但在 UI 上显示检测结果
+          // 实际发送请求时，会计算最终值
+        }
+      };
+    }
+  }, [originalUrl]);
 
   // 处理图片上传
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -32,6 +67,8 @@ const App6LumiFluxApp: React.FC = () => {
       setErrorMsg(null);
       setStatusText("");
       setTasks({});
+      // 重置为自动，触发重新检测
+      setConfig(prev => ({ ...prev, aspectRatio: 'auto' }));
     }
   };
 
@@ -54,7 +91,7 @@ const App6LumiFluxApp: React.FC = () => {
     }
   };
 
-  // 启动高保真渲染（读取文本框最新内容）
+  // 启动高保真渲染
   const startRendering = async () => {
     if (!analysis || !originalFile) return;
     setLoading(true);
@@ -62,22 +99,29 @@ const App6LumiFluxApp: React.FC = () => {
     setStep(LumiStep.RENDERING);
     setStatusText("正在启动高保真智造引擎...");
     
+    // 计算最终使用的比例
+    const finalRatio = config.aspectRatio === 'auto' ? (detectedRatio as LumiAspectRatio || '1:1') : config.aspectRatio;
+    const finalConfig = { ...config, aspectRatio: finalRatio };
+
     try {
-      // 关键逻辑：将当前文本框中的文字（analysis.reasoning）作为最新的视觉指令发送给绘图引擎
-      const imageTaskId = await lumiService.generateAnchorImage(analysis.reasoning, originalFile);
+      // 1. 生成静态锚点图
+      const imageTaskId = await lumiService.generateAnchorImage(analysis.reasoning, originalFile, finalConfig);
       setTasks(prev => ({
         ...prev,
         image: { id: imageTaskId, type: 'image', status: 'pending', progress: 5 }
       }));
+      setActiveTab('image');
 
       pollTask(imageTaskId, 'image', async (finalImageUrl) => {
           setStatusText("静态视觉锚点已就绪，正在渲染动态流光视频...");
           try {
-            const videoTaskId = await lumiService.generateLumiVideo(analysis.videoPrompt, finalImageUrl, { aspectRatio: "1:1", resolution: "1080p" });
+            // 2. 生成动态视频
+            const videoTaskId = await lumiService.generateLumiVideo(analysis.videoPrompt, finalImageUrl, finalConfig);
             setTasks(prev => ({
               ...prev,
               video: { id: videoTaskId, type: 'video', status: 'pending', progress: 5 }
             }));
+            setActiveTab('video');
             pollTask(videoTaskId, 'video');
           } catch (vErr: any) {
             setErrorMsg(`视频启动异常: ${vErr.message}`);
@@ -127,6 +171,22 @@ const App6LumiFluxApp: React.FC = () => {
     }, 4000);
   };
 
+  // 渲染比例选择按钮
+  const RatioBtn = ({ ratio, icon: Icon, label }: { ratio: LumiAspectRatio, icon: any, label?: string }) => (
+    <button 
+      onClick={() => setConfig({ ...config, aspectRatio: ratio })}
+      className={`flex flex-col items-center justify-center p-2 rounded-lg border transition-all ${
+        config.aspectRatio === ratio 
+        ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' 
+        : 'bg-white/5 border-transparent text-slate-400 hover:bg-white/10'
+      }`}
+      title={label || ratio}
+    >
+      <Icon className="w-4 h-4 mb-1" />
+      <span className="text-[9px] font-bold">{label || ratio}</span>
+    </button>
+  );
+
   return (
     <div className="min-h-screen bg-[#050810] text-slate-100 font-sans selection:bg-cyan-500/30">
       <header className="h-16 border-b border-white/5 bg-black/40 backdrop-blur-md flex items-center px-8 justify-between sticky top-0 z-50">
@@ -151,7 +211,7 @@ const App6LumiFluxApp: React.FC = () => {
         <div className="grid lg:grid-cols-12 gap-12">
           {/* 左侧控制面板 */}
           <div className="lg:col-span-4 space-y-8">
-            <div className="bg-slate-900/40 border border-white/10 rounded-[40px] p-10 space-y-10 backdrop-blur-xl relative">
+            <div className="bg-slate-900/40 border border-white/10 rounded-[40px] p-8 space-y-8 backdrop-blur-xl relative">
               <div className="space-y-2">
                 <h2 className="text-sm font-black text-cyan-400 uppercase tracking-widest flex items-center gap-3">
                   <Cpu className="w-4 h-4" /> 产品素材获取
@@ -181,8 +241,78 @@ const App6LumiFluxApp: React.FC = () => {
                   value={instruction}
                   onChange={(e) => setInstruction(e.target.value)}
                   placeholder="例如：在底部增加蓝色流光，强化金属质感..."
-                  className="w-full h-32 bg-black/40 border border-white/5 rounded-2xl p-5 text-sm font-medium focus:border-cyan-500/50 outline-none transition-all placeholder:text-slate-700 leading-relaxed"
+                  className="w-full h-24 bg-black/40 border border-white/5 rounded-2xl p-4 text-xs font-medium focus:border-cyan-500/50 outline-none transition-all placeholder:text-slate-700 leading-relaxed"
                 />
+              </div>
+
+              {/* 智造参数控制台 */}
+              <div className="space-y-4 pt-2 border-t border-white/5">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1 flex items-center gap-2">
+                   <Scan className="w-3 h-3" /> 智造参数控制台
+                </label>
+                
+                {/* 第一行：比例 */}
+                <div className="grid grid-cols-5 gap-2">
+                   <button 
+                      onClick={() => setConfig({ ...config, aspectRatio: 'auto' })}
+                      className={`col-span-1 flex flex-col items-center justify-center p-2 rounded-lg border transition-all ${
+                        config.aspectRatio === 'auto' 
+                        ? 'bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border-cyan-500 text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)]' 
+                        : 'bg-white/5 border-transparent text-slate-400 hover:bg-white/10'
+                      }`}
+                   >
+                      <Scan className="w-4 h-4 mb-1" />
+                      <span className="text-[9px] font-bold">Auto</span>
+                   </button>
+                   <RatioBtn ratio="1:1" icon={Square} />
+                   <RatioBtn ratio="16:9" icon={RectangleHorizontal} />
+                   <RatioBtn ratio="9:16" icon={RectangleVertical} />
+                   <RatioBtn ratio="4:3" icon={RectangleHorizontal} />
+                </div>
+                {config.aspectRatio === 'auto' && detectedRatio && (
+                   <div className="text-[9px] text-cyan-500/70 text-right px-1">
+                      ✨ 智能识别原图比例: {detectedRatio}
+                   </div>
+                )}
+
+                {/* 第二行：精度与时长 */}
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="bg-black/20 p-1 rounded-xl flex">
+                      {(['1K', '2K', '4K'] as const).map(res => (
+                         <button 
+                           key={res} 
+                           onClick={() => setConfig({ ...config, imageResolution: res })}
+                           className={`flex-1 py-1.5 text-[9px] font-bold rounded-lg transition-all ${config.imageResolution === res ? 'bg-white/10 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                         >
+                           {res}
+                         </button>
+                      ))}
+                   </div>
+                   <div className="bg-black/20 p-1 rounded-xl flex">
+                      {(['720p', '1080p'] as const).map(res => (
+                         <button 
+                           key={res} 
+                           onClick={() => setConfig({ ...config, videoResolution: res })}
+                           className={`flex-1 py-1.5 text-[9px] font-bold rounded-lg transition-all ${config.videoResolution === res ? 'bg-white/10 text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}
+                         >
+                           {res}
+                         </button>
+                      ))}
+                   </div>
+                </div>
+
+                 <div className="bg-black/20 p-1 rounded-xl flex">
+                      <span className="px-3 py-1.5 text-[9px] font-bold text-slate-500 uppercase">时长</span>
+                      {([5, 10] as const).map(dur => (
+                         <button 
+                           key={dur} 
+                           onClick={() => setConfig({ ...config, duration: dur })}
+                           className={`flex-1 py-1.5 text-[9px] font-bold rounded-lg transition-all ${config.duration === dur ? 'bg-cyan-600/20 text-cyan-400 shadow-sm border border-cyan-500/20' : 'text-slate-500 hover:text-slate-300'}`}
+                         >
+                           {dur}s Loop
+                         </button>
+                      ))}
+                   </div>
               </div>
 
               <div className="pt-4 space-y-4">
@@ -224,7 +354,7 @@ const App6LumiFluxApp: React.FC = () => {
                   <textarea
                     value={analysis.reasoning}
                     onChange={(e) => setAnalysis({ ...analysis, reasoning: e.target.value })}
-                    className="w-full bg-transparent border-none outline-none text-xs text-cyan-100/70 leading-relaxed italic resize-none min-h-[140px] scrollbar-hide border-b border-cyan-500/10 focus:border-cyan-500/30 transition-all"
+                    className="w-full bg-transparent border-none outline-none text-xs text-cyan-100/70 leading-relaxed italic resize-none min-h-[100px] scrollbar-hide border-b border-cyan-500/10 focus:border-cyan-500/30 transition-all"
                     placeholder="在这里修改 AI 的分析见解..."
                   />
                   <p className="text-[9px] text-cyan-500/50 text-right uppercase">渲染将以剧本文字为准</p>
@@ -256,7 +386,9 @@ const App6LumiFluxApp: React.FC = () => {
 
                 <div className="space-y-4">
                   <span className="text-[10px] font-black text-cyan-500/80 uppercase tracking-widest ml-2">AI 流光智造成品</span>
-                  <div className="aspect-square rounded-[32px] bg-black/60 border border-cyan-500/10 flex items-center justify-center overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.8)] relative group">
+                  <div className={`aspect-square rounded-[32px] bg-black/60 border border-cyan-500/10 flex items-center justify-center overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.8)] relative group ${
+                    config.aspectRatio === '16:9' ? 'aspect-video' : config.aspectRatio === '9:16' ? 'aspect-[9/16]' : 'aspect-square'
+                  }`}>
                     {activeTab === 'image' ? (
                       tasks.image?.resultUrl ? (
                         <img src={tasks.image.resultUrl} className="w-full h-full object-contain animate-in zoom-in" />

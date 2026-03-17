@@ -1,0 +1,8 @@
+
+{
+  "name": "万象批改助手",
+  "description": "专业级电商多图元素批量替换专家，支持模特换装、产品同步替换及4K高清渲染。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
