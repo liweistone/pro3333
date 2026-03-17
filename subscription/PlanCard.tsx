@@ -133,12 +133,13 @@ export const PlanCard: React.FC<PlanCardProps> = ({ plan }) => {
         </div>
       </div>
 
-      <style jsx>{`
+      {/* Fix: Replaced invalid 'style jsx' with React-compliant dangerouslySetInnerHTML to fix property 'jsx' error */}
+      <style dangerouslySetInnerHTML={{ __html: `
         .perspective { perspective: 1000px; }
         .transform-style-3d { transform-style: preserve-3d; }
         .backface-hidden { backface-visibility: hidden; }
         .rotate-y-180 { transform: rotateY(180deg); }
-      `}</style>
+      ` }} />
     </div>
   );
 };

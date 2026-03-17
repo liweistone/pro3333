@@ -27,7 +27,6 @@ export class ApimartProvider {
 
   /**
    * 图像生成 (异步模式)
-   * 核心修复：同时发送 size 和 aspect_ratio 确保网关兼容性
    */
   async generateImage(
     prompt: string,
@@ -35,15 +34,13 @@ export class ApimartProvider {
     imageUrls: string[] = []
   ): Promise<string> {
     const url = `${this.config.baseUrl}/v1/images/generations`;
-    
-    // 兼容逻辑：取两者之中的有效值
     const targetRatio = config.aspectRatio || config.size || '1:1';
     
     const payload = {
       model: config.model || 'gemini-3-pro-image-preview',
       prompt,
-      size: targetRatio,         // 部分网关识别此字段
-      aspect_ratio: targetRatio, // 旗舰模型标准识别此字段
+      size: targetRatio,
+      aspect_ratio: targetRatio,
       resolution: config.resolution || '1K',
       n: 1,
       image_urls: imageUrls.length > 0 ? imageUrls.map(url => ({ url })) : undefined
@@ -79,23 +76,37 @@ export class ApimartProvider {
     throw new Error(response.error?.message || response.msg || '视频生成任务创建失败');
   }
 
+  /**
+   * 增强型多模态分析：支持单图或多图数组
+   */
   async analyzeWithMultimodal(
     text: string,
-    imageBase64?: string,
+    images?: string | string[],
     model: string = 'gemini-3-pro-preview',
     generationConfig?: any
   ): Promise<any> {
     const url = `${this.config.baseUrl}/v1beta/models/${model}:generateContent`;
     const parts: any[] = [{ text }];
-    if (imageBase64) {
+    
+    const imageArray = Array.isArray(images) ? images : (images ? [images] : []);
+    
+    imageArray.forEach(imageBase64 => {
       const data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
       const mimeType = imageBase64.includes(';') ? imageBase64.match(/:(.*?);/)?.[1] || 'image/jpeg' : 'image/jpeg';
       parts.push({ inlineData: { mimeType, data } });
-    }
+    });
+
     const payload = { 
       contents: [{ role: "user", parts }],
-      generationConfig: generationConfig 
+      generationConfig: {
+        responseMimeType: "application/json",
+        ...generationConfig
+      },
+      systemInstruction: generationConfig?.systemInstruction ? {
+        parts: [{ text: generationConfig.systemInstruction }]
+      } : undefined
     };
+    
     return await this.makeRequest(url, payload);
   }
 
@@ -110,10 +121,8 @@ export class ApimartProvider {
     const token = API_CONFIG.MASTER_KEY;
     if (!token) throw new Error("请在大厅配置 API 密钥后再启动任务");
 
-    // 关键修复：检测非法字符（如中文、全角字符），防止 fetch 报错 "String contains non ISO-8859-1 code point"
-    // eslint-disable-next-line no-control-regex
     if (/[^\x00-\x7F]/.test(token)) {
-       throw new Error("API 密钥格式错误：检测到包含非法字符（如中文或全角符号）。请在设置中重新输入纯英文的 API Key。");
+       throw new Error("API 密钥格式错误：检测到非法字符。请在设置中重新输入纯英文 Key。");
     }
 
     const headers: Record<string, string> = {
@@ -128,16 +137,25 @@ export class ApimartProvider {
     
     try {
       const response = await fetch(url, options);
-      const result = await response.json();
       if (!response.ok) {
-        const msg = result.error?.message || result.msg || `API 请求异常 (HTTP ${response.status})`;
-        throw new Error(msg);
+        // 先尝试读取文本，因为 413/504 等可能不是 JSON
+        const errorText = await response.text();
+        let errorMsg = `API 请求异常 (HTTP ${response.status})`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMsg = errorJson.error?.message || errorJson.msg || errorMsg;
+        } catch {
+          errorMsg = errorText.substring(0, 100) || errorMsg;
+        }
+        throw new Error(errorMsg);
       }
-      return result;
+      return await response.json();
     } catch (error: any) {
-       // 捕获网络层面的错误，如 fetch 失败
+       if (error.message === 'Failed to fetch') {
+         throw new Error("网络请求失败 (Failed to fetch)，可能是图片数据过大导致，请减少上传图片数量或压缩图片。");
+       }
        if (error.message.includes('ISO-8859-1')) {
-         throw new Error("API 密钥包含非法字符，请检查是否误复制了中文文本。");
+         throw new Error("API 密钥包含非法字符，请检查是否误复制了中文。");
        }
        throw error;
     }
