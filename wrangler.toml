@@ -49,7 +49,7 @@ PAYMENT_NOTIFY_DOMAIN = "https://aideator.top"
 [[d1_databases]]
 binding = "DB"
 database_name = "my-database"
-database_id = "your-actual-database-id"
+database_id = "49ca29bc-8b98-4102-a1b5-191665fdeecd"
 
 # R2 存储桶配置
 [[r2_buckets]]
