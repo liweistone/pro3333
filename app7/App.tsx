@@ -274,6 +274,13 @@ const App7PresetHub: React.FC<App7PresetHubProps> = ({ onUsePreset }) => {
       
       // 同时上报使用统计
       fetch(getApiUrl(`/api/presets/${preset.id}/use`), { method: 'POST' }).catch(() => {});
+      
+      // 新增：立即更新本地状态，让用户看到数据变化
+      setPresets(prev => prev.map(p => 
+        p.id === preset.id 
+          ? { ...p, view_count: (p.view_count || 0) + 1 } 
+          : p
+      ));
     } catch (error) {
       console.error("获取效果图失败，执行降级逻辑:", error);
       // 降级处理：如果获取失败，则不填充参考图
