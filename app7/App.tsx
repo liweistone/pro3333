@@ -27,6 +27,95 @@ let hasInitialized = false;
 const PAGE_SIZE = 24; 
 const BASE_PROD_URL = 'https://aideator.top';
 
+// 新增：预设效果图预览组件
+const PresetEffectImages: React.FC<{ 
+  presetId: string; 
+  getApiUrl: (endpoint: string) => string;
+  getImageUrl: (path: string | null) => string;
+}> = ({ presetId, getApiUrl, getImageUrl }) => {
+  const [images, setImages] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (containerRef.current) observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) return;
+
+    const fetchImages = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(getApiUrl(`/api/presets/${presetId}/effect-images`), {
+          mode: 'cors',
+          credentials: 'omit'
+        });
+        if (response.ok) {
+          const rawData = await response.json();
+          const list = Array.isArray(rawData) 
+            ? rawData 
+            : (rawData.data || rawData.results || rawData.images || rawData.presets || []);
+          
+          const urls = list
+            .map((img: any) => {
+              const path = img.url || img.image_url || img.image || img.path;
+              return path ? getImageUrl(path) : null;
+            })
+            .filter((url: any) => typeof url === 'string' && url.length > 0) as string[];
+          
+          setImages(urls.slice(0, 5)); // 预览显示前5张
+        }
+      } catch (e) {
+        console.error("Failed to fetch effect images for preview", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchImages();
+  }, [isVisible, presetId]);
+
+  if (!isVisible && !loading && images.length === 0) {
+      return <div ref={containerRef} className="h-12" />;
+  }
+
+  if (images.length === 0 && !loading) return null;
+
+  return (
+    <div ref={containerRef} className="flex gap-1.5 px-4 py-2 overflow-x-auto no-scrollbar scroll-smooth">
+      {loading ? (
+        <div className="flex gap-1.5 animate-pulse">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="w-10 h-10 bg-white/5 rounded-lg shrink-0" />
+          ))}
+        </div>
+      ) : (
+        images.map((url, idx) => (
+          <div key={idx} className="relative w-10 h-10 rounded-lg overflow-hidden border border-white/10 hover:border-indigo-500/50 transition-all hover:scale-110 shrink-0 shadow-sm">
+            <img 
+              src={url} 
+              className="w-full h-full object-cover" 
+              referrerPolicy="no-referrer"
+            />
+          </div>
+        ))
+      )}
+    </div>
+  );
+};
+
 interface App7PresetHubProps {
   onUsePreset?: (data: { prompt: string; negative?: string; images: string[] }) => void;
 }
@@ -306,6 +395,13 @@ const App7PresetHub: React.FC<App7PresetHubProps> = ({ onUsePreset }) => {
                           </button>
                       </div>
                     </div>
+
+                    {/* 新增：参考图预览区域 */}
+                    <PresetEffectImages 
+                      presetId={preset.id} 
+                      getApiUrl={getApiUrl} 
+                      getImageUrl={getImageUrl} 
+                    />
 
                     <div className="p-4 flex-1 flex flex-col">
                       <h3 className="text-[11px] font-black text-white/90 group-hover:text-indigo-400 transition-colors truncate mb-1" title={preset.title}>
