@@ -27,6 +27,30 @@ let hasInitialized = false;
 const PAGE_SIZE = 24; 
 const BASE_PROD_URL = 'https://aideator.top';
 
+// 偏好权重配置
+const WEIGHTS = {
+  USE: 2,      // 点击“生成同款”权重
+  FAVORITE: 5, // 收藏权重（预留）
+  VIEW: 1      // 查看权重
+};
+
+// 获取分类权重表
+const getCategoryWeights = (): Record<string, number> => {
+  try {
+    const data = localStorage.getItem('PRESET_CATEGORY_WEIGHTS');
+    return data ? JSON.parse(data) : {};
+  } catch {
+    return {};
+  }
+};
+
+// 更新分类权重
+const updateCategoryWeight = (categoryId: string, weight: number) => {
+  const weights = getCategoryWeights();
+  weights[categoryId] = (weights[categoryId] || 0) + weight;
+  localStorage.setItem('PRESET_CATEGORY_WEIGHTS', JSON.stringify(weights));
+};
+
 // 新增：预设效果图预览组件
 const PresetEffectImages: React.FC<{ 
   presetId: string; 
@@ -125,6 +149,7 @@ const App7PresetHub: React.FC<App7PresetHubProps> = ({ onUsePreset }) => {
   const [activeCategory, setActiveCategory] = useState<string>('全部');
   const [categories, setCategories] = useState<{ [id: string]: string }>(cachedCategories);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   
   const [loading, setLoading] = useState(false);
   const [isNextPageLoading, setIsNextPageLoading] = useState(false);
@@ -150,6 +175,13 @@ const App7PresetHub: React.FC<App7PresetHubProps> = ({ onUsePreset }) => {
     return `${BASE_PROD_URL}/api/images/public${normalizedPath}`;
   };
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const loadData = async (isAppend: boolean = false) => {
     if (isFetchingRef.current) return;
     if (isAppend && !hasMore) return;
@@ -164,24 +196,60 @@ const App7PresetHub: React.FC<App7PresetHubProps> = ({ onUsePreset }) => {
     try {
       let endpoint = `/api/presets?limit=${PAGE_SIZE}&offset=${currentOffset}`;
       if (activeCategory !== '全部') endpoint += `&category_id=${activeCategory}`;
-      if (searchQuery) endpoint += `&q=${encodeURIComponent(searchQuery)}`;
+      // 方案优化：更换参数名为 search，对齐 API 规范
+      if (debouncedSearchQuery) endpoint += `&search=${encodeURIComponent(debouncedSearchQuery)}`;
 
       const res = await fetch(getApiUrl(endpoint));
       if (res.ok) {
           const data = await res.json();
-          const list = Array.isArray(data) ? data : (data.presets || data.results || data.data || []);
+          let list = Array.isArray(data) ? data : (data.presets || data.results || data.data || []);
           
+          // 方案优化：千人千面前端模拟排序
+          if (activeCategory === '全部' && !debouncedSearchQuery) {
+            const weights = getCategoryWeights();
+            // 找出权重最高的分类（前2名）
+            const topCategories = Object.entries(weights)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 2)
+              .map(item => item[0]);
+
+            list = list.map((p: any) => ({
+              ...p,
+              _is_recommended: topCategories.includes(p.category_id)
+            })).sort((a: any, b: any) => {
+              // 推荐的排在前面
+              if (a._is_recommended && !b._is_recommended) return -1;
+              if (!a._is_recommended && b._is_recommended) return 1;
+              return 0;
+            });
+          }
+
+          // 方案优化：增加前端本地过滤兜底，防止后端忽略搜索参数
+          if (debouncedSearchQuery && list.length > 0) {
+            const query = debouncedSearchQuery.toLowerCase();
+            const filteredList = list.filter((p: Preset) => 
+              (p.title && p.title.toLowerCase().includes(query)) || 
+              (p.positive && p.positive.toLowerCase().includes(query)) ||
+              (p.description && p.description.toLowerCase().includes(query))
+            );
+            // 如果过滤后结果变少了，说明后端可能没过滤，我们使用过滤后的结果
+            // 如果过滤后结果没变，说明后端可能已经过滤了，或者确实都匹配
+            if (filteredList.length < list.length) {
+              list = filteredList;
+            }
+          }
+
           if (isAppend) {
               setPresets(prev => {
                   const existingIds = new Set(prev.map(p => p.id));
                   const uniqueNewList = list.filter((p: Preset) => !existingIds.has(p.id));
                   const merged = [...prev, ...uniqueNewList];
-                  if (activeCategory === '全部' && !searchQuery) cachedPresets = merged;
+                  if (activeCategory === '全部' && !debouncedSearchQuery) cachedPresets = merged;
                   return merged;
               });
           } else {
               setPresets(list);
-              if (activeCategory === '全部' && !searchQuery) cachedPresets = list;
+              if (activeCategory === '全部' && !debouncedSearchQuery) cachedPresets = list;
           }
           setHasMore(list.length >= PAGE_SIZE);
       } else {
@@ -220,10 +288,10 @@ const App7PresetHub: React.FC<App7PresetHubProps> = ({ onUsePreset }) => {
   }, []);
 
   useEffect(() => {
-    if (activeCategory === '全部' && !searchQuery && presets.length === cachedPresets.length && presets.length > 0) return;
+    if (activeCategory === '全部' && !debouncedSearchQuery && presets.length === cachedPresets.length && presets.length > 0) return;
     setHasMore(true);
     loadData(false);
-  }, [activeCategory, searchQuery]);
+  }, [activeCategory, debouncedSearchQuery]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -274,6 +342,9 @@ const App7PresetHub: React.FC<App7PresetHubProps> = ({ onUsePreset }) => {
       
       // 同时上报使用统计
       fetch(getApiUrl(`/api/presets/${preset.id}/use`), { method: 'POST' }).catch(() => {});
+      
+      // 千人千面：更新分类权重
+      updateCategoryWeight(preset.category_id, WEIGHTS.USE);
       
       // 新增：立即更新本地状态，让用户看到数据变化
       setPresets(prev => prev.map(p => 
@@ -371,6 +442,13 @@ const App7PresetHub: React.FC<App7PresetHubProps> = ({ onUsePreset }) => {
                 {presets.map(preset => (
                   <div key={preset.id} className="group bg-slate-900/40 border border-white/5 rounded-xl overflow-hidden hover:border-indigo-500/30 transition-all duration-500 flex flex-col shadow-sm hover:shadow-xl hover:-translate-y-1">
                     <div className="relative aspect-[3/4] bg-black overflow-hidden border-b border-white/5">
+                      {/* 推荐勋章 */}
+                      {(preset as any)._is_recommended && (
+                        <div className="absolute top-3 left-3 z-40 px-2 py-1 bg-indigo-500 text-white text-[8px] font-black uppercase tracking-widest rounded-lg shadow-xl flex items-center gap-1 animate-in fade-in zoom-in duration-500">
+                          <Sparkles className="w-2.5 h-2.5" /> AI 推荐
+                        </div>
+                      )}
+                      
                       <img 
                         src={getImageUrl(preset.image)} 
                         className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-40 saturate-150 scale-110 pointer-events-none" 
