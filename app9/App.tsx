@@ -34,6 +34,7 @@ const App9LumiereStation: React.FC<App9LumiereStationProps> = ({ isModal, prefil
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
+  const [replacingIndex, setReplacingIndex] = useState<number | null>(null);
 
   const tabs = [
     { id: 'video', label: '视频生成', icon: Video, color: 'text-blue-500' },
@@ -71,9 +72,19 @@ const App9LumiereStation: React.FC<App9LumiereStationProps> = ({ isModal, prefil
     reader.onloadend = () => {
       const base64 = reader.result as string;
       if (activeTab === 'image') {
-        setImageRefs(prev => [...prev, base64]);
+        if (replacingIndex !== null) {
+          setImageRefs(prev => {
+            const next = [...prev];
+            next[replacingIndex] = base64;
+            return next;
+          });
+          setReplacingIndex(null);
+        } else {
+          setImageRefs(prev => [...prev, base64]);
+        }
       } else if (activeSlotId) {
         setFixedSlots(prev => ({ ...prev, [activeSlotId]: base64 }));
+        setActiveSlotId(null);
       }
     };
     reader.readAsDataURL(file);
@@ -169,13 +180,24 @@ const App9LumiereStation: React.FC<App9LumiereStationProps> = ({ isModal, prefil
         {imageRefs.map((src, idx) => (
           <div key={idx} className="relative w-24 h-24 rounded-2xl border-2 border-indigo-500 overflow-hidden group shadow-lg ring-4 ring-indigo-500/10 shrink-0">
             <img src={src} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-            <button 
-              onClick={() => removeImageRef(idx)}
-              className="absolute -top-1 -right-1 p-1.5 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg hover:bg-rose-600 z-10"
-            >
-              <Trash2 className="w-3 h-3" />
-            </button>
-            <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+            
+            {/* 居中操作遮罩 */}
+            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center gap-3 backdrop-blur-[2px]">
+              <button 
+                onClick={() => { setReplacingIndex(idx); fileInputRef.current?.click(); }}
+                className="p-2 bg-white text-indigo-600 rounded-full shadow-xl hover:scale-110 active:scale-95 transition-all"
+                title="替换图片"
+              >
+                <RefreshCcw className="w-4 h-4" />
+              </button>
+              <button 
+                onClick={() => removeImageRef(idx)}
+                className="p-2 bg-white text-rose-500 rounded-full shadow-xl hover:scale-110 active:scale-95 transition-all"
+                title="删除图片"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         ))}
         <div 
@@ -203,13 +225,34 @@ const App9LumiereStation: React.FC<App9LumiereStationProps> = ({ isModal, prefil
         {currentSlots.map(s => (
           <div 
             key={s.id} 
-            onClick={() => { setActiveSlotId(s.id); fileInputRef.current?.click(); }}
+            onClick={() => { if (!fixedSlots[s.id]) { setActiveSlotId(s.id); fileInputRef.current?.click(); } }}
             className={`w-24 h-24 rounded-2xl border-2 border-dashed transition-all flex flex-col items-center justify-center cursor-pointer overflow-hidden relative group shrink-0 ${fixedSlots[s.id] ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-slate-50 hover:border-indigo-400'}`}
           >
             {fixedSlots[s.id] ? (
-              <div className="w-full h-full">
-                {s.isAudio ? <div className="w-full h-full flex items-center justify-center"><Zap className="w-8 h-8 text-indigo-500" /></div> : <img src={fixedSlots[s.id]!} className="w-full h-full object-cover" referrerPolicy="no-referrer" />}
-                <button onClick={(e) => { e.stopPropagation(); setFixedSlots(prev => ({ ...prev, [s.id]: null })); }} className="absolute top-1 right-1 p-1 bg-white/80 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:text-rose-500 shadow-sm"><Trash2 className="w-3 h-3" /></button>
+              <div className="w-full h-full relative">
+                {s.isAudio ? (
+                  <div className="w-full h-full flex items-center justify-center"><Zap className="w-8 h-8 text-indigo-500" /></div>
+                ) : (
+                  <img src={fixedSlots[s.id]!} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                )}
+                
+                {/* 居中操作遮罩 */}
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center gap-3 backdrop-blur-[2px]">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setActiveSlotId(s.id); fileInputRef.current?.click(); }}
+                    className="p-2 bg-white text-indigo-600 rounded-full shadow-xl hover:scale-110 active:scale-95 transition-all"
+                    title="替换素材"
+                  >
+                    <RefreshCcw className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setFixedSlots(prev => ({ ...prev, [s.id]: null })); }}
+                    className="p-2 bg-white text-rose-500 rounded-full shadow-xl hover:scale-110 active:scale-95 transition-all"
+                    title="删除素材"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ) : (
               <>
